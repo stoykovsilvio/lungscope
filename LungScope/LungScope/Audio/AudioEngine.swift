@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import os.log
 
 /// Owns and manages the AVAudioEngine session for a single assessment.
@@ -20,6 +21,14 @@ final class AudioEngine {
     private var converter: AVAudioConverter?
 
     private let log = OSLog(subsystem: "com.lungscope", category: "AudioEngine")
+
+    // Callback fired on @MainActor at ≤30fps with one RMS value per ~512-sample window.
+    // Assigned by AssessmentViewModel before the cough phase starts.
+    var onWaveformSample: ((Float) -> Void)?
+
+    // Running counter for downsampling tap frames to ≤30fps RMS posts.
+    private var tapFrameAccumulator: Int = 0
+    private let rmsPostInterval = 512
 
     // MARK: - Public Interface
 
@@ -43,6 +52,13 @@ final class AudioEngine {
         vowelBuffer.reset()
         phaseController.transition(to: .vowel)
         os_log("Phase → vowel", log: log, type: .debug)
+    }
+
+    /// Pauses sample capture between phases without stopping the engine.
+    /// The tap keeps running but writes nothing until the next phase starts.
+    func pauseBetweenPhases() {
+        phaseController.transition(to: .idle)
+        os_log("Phase → idle (between phases)", log: log, type: .debug)
     }
 
     /// Stops capture and returns both buffers' samples for DSP analysis.
@@ -70,16 +86,18 @@ final class AudioEngine {
 
     private func configureEngine() throws {
         let inputNode = engine.inputNode
-        let hardwareFormat = inputNode.outputFormat(forBus: 0)
 
-        // Pre-warm converter if hardware rate differs from 16kHz canonical.
+        // prepare() forces the hardware connection so outputFormat returns a
+        // valid sample rate. Without it, the format can come back with rate 0.
+        engine.prepare()
+
+        let hardwareFormat = inputNode.outputFormat(forBus: 0)
         converter = AudioFormat.makeConverter(from: hardwareFormat)
 
-        let tapFormat = converter == nil ? AudioFormat.canonical : hardwareFormat
-
+        inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0,
                              bufferSize: 4096,
-                             format: tapFormat) { [weak self] buffer, _ in
+                             format: nil) { [weak self] buffer, _ in
             self?.handleBuffer(buffer)
         }
 
@@ -108,8 +126,12 @@ final class AudioEngine {
 
     private func convertBuffer(_ input: AVAudioPCMBuffer,
                                 using converter: AVAudioConverter) -> AVAudioPCMBuffer? {
+        let inputRate  = converter.inputFormat.sampleRate
+        let outputRate = converter.outputFormat.sampleRate
+        let outputCapacity = AVAudioFrameCount(Double(input.frameLength) * outputRate / inputRate + 1)
+
         guard let output = AVAudioPCMBuffer(pcmFormat: AudioFormat.canonical,
-                                            frameCapacity: input.frameLength) else { return nil }
+                                            frameCapacity: outputCapacity) else { return nil }
         var error: NSError?
         var sourceDone = false
 
@@ -135,6 +157,17 @@ final class AudioEngine {
         case .cough:  coughBuffer.write(from: pointer, count: frameCount)
         case .vowel:  vowelBuffer.write(from: pointer, count: frameCount)
         case .idle:   break
+        }
+
+        // Post one RMS value to the waveform display callback every ~512 samples.
+        // vDSP_rmsqv is real-time safe (no allocation). The DispatchQueue hop is
+        // unavoidable here — the tap runs on the audio thread, not @MainActor.
+        tapFrameAccumulator += frameCount
+        if tapFrameAccumulator >= rmsPostInterval, let cb = onWaveformSample {
+            tapFrameAccumulator = 0
+            var rms: Float = 0
+            vDSP_rmsqv(pointer, 1, &rms, vDSP_Length(frameCount))
+            DispatchQueue.main.async { cb(rms) }
         }
     }
 }

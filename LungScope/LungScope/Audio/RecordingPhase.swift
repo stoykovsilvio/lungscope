@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Represents the current active phase of a single assessment session.
 /// This value is written by the UI coordinator and read inside the
