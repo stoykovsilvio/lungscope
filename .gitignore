@@ -1,0 +1,41 @@
+# macOS
+.DS_Store
+
+# Recordings (raw audio data)
+recordings/
+
+# Thesis and study files
+ML_STUDY_GUIDE.md
+ML_STUDY_GUIDE_BG.md
+THESIS_PLAN.md
+ROADMAP.md
+
+# Technical documentation
+LungScope/Technical_Documentation/
+Technical_Documentation/
+
+# Xcode
+*.xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+*.egg-info/
+
+# ML artifacts
+*.mlmodelc/
+data/features.parquet
