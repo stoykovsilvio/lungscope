@@ -105,11 +105,12 @@ final class FFTProcessor {
         // 5. Scale: vDSP_fft_zrip output is scaled by 2 relative to a
         //    full-length DFT. Divide by fftSize to obtain true magnitudes.
         var scale = Float(fftSize)
-        vDSP_vsdiv(&magnitudes, 1, &scale, &magnitudes, 1, vDSP_Length(fftSize / 2))
+        var scaledMagnitudes = [Float](repeating: 0, count: fftSize / 2)
+        vDSP_vsdiv(&magnitudes, 1, &scale, &scaledMagnitudes, 1, vDSP_Length(fftSize / 2))
 
         // 6. Append the Nyquist bin (stored in imag[0] by vDSP convention).
         var result = [Float](repeating: 0, count: magnitudeBinCount)
-        result[0..<fftSize / 2] = magnitudes[0..<fftSize / 2]
+        result[0..<fftSize / 2] = scaledMagnitudes[0..<fftSize / 2]
         result[fftSize / 2] = abs(splitComplex.imagp[0]) / Float(fftSize)
 
         return result
